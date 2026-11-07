@@ -1,0 +1,41 @@
+# Dataset
+data/*
+
+# Model checkpoints
+checkpoints/*
+*.pth
+*.pt
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environments
+.venv/
+venv/
+env/
+
+.DS_Store
+__pycache__/
+.ipynb_checkpoints/
+
+# Dataset
+data/*
+!data/splits.json
+!data/.gitkeep
+
+# Training outputs
+outputs/
+*.pt
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Experiment outputs
+*.log
