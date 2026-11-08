@@ -108,13 +108,14 @@ class Ai4MarsSegmentation(Dataset):
         if label is None:
             raise ValueError(f"Row {idx}: label mask missing")
 
+        # exclusions at full resolution first, then resize
         label, _ = apply_exclusions(label, rover, range_)
         label = resize_label(label, self.img_size)
 
         image = resize_image(image.convert("RGB"), self.img_size)
-        if self.transform is not None:                       
-            image, label = self.transform(image, label)      
-        image = np.asarray(image, dtype=np.float32) / 255.0
+        if self.transform is not None:
+            image, label = self.transform(image, label)
+
         image = np.asarray(image, dtype=np.float32) / 255.0
         if self.normalize:
             image = (image - IMAGENET_MEAN) / IMAGENET_STD
