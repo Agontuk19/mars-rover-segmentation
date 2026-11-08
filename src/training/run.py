@@ -10,6 +10,7 @@ from src.models.factory import build_model
 from src.training.losses import build_loss
 from src.training.train import fit
 from src.utils.common import seed_everything
+from src.data.transforms import build_train_transform
 
 
 def run_experiment(cfg, raw_datasets, splits, device, out_root):
@@ -32,7 +33,8 @@ def run_experiment(cfg, raw_datasets, splits, device, out_root):
     pin = device.type == "cuda"
 
     train_loader, val_loader = build_train_val_loaders(
-        raw_datasets, splits, img_size, batch_size, num_workers, pin_memory=pin)
+        raw_datasets, splits, img_size, batch_size, num_workers, pin_memory=pin,
+        train_transform=build_train_transform(cfg))
 
     model = build_model(cfg).to(device)
     criterion = build_loss(cfg, device)

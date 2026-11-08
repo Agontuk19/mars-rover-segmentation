@@ -84,11 +84,12 @@ def resize_label(label, size=IMG_SIZE):
 class Ai4MarsSegmentation(Dataset):
     """Returns (image float32 (3,H,W) normalized, label int64 (H,W) in {0,1,2,3,255})."""
 
-    def __init__(self, raw_split, indices, img_size=IMG_SIZE, normalize=True):
+    def __init__(self, raw_split, indices, img_size=IMG_SIZE, normalize=True, transform=None):
         self.data = raw_split
         self.indices = [int(i) for i in indices]
         self.img_size = img_size
         self.normalize = normalize
+        self.transform = transform
 
     def __len__(self):
         return len(self.indices)
@@ -111,6 +112,9 @@ class Ai4MarsSegmentation(Dataset):
         label = resize_label(label, self.img_size)
 
         image = resize_image(image.convert("RGB"), self.img_size)
+        if self.transform is not None:                       
+            image, label = self.transform(image, label)      
+        image = np.asarray(image, dtype=np.float32) / 255.0
         image = np.asarray(image, dtype=np.float32) / 255.0
         if self.normalize:
             image = (image - IMAGENET_MEAN) / IMAGENET_STD

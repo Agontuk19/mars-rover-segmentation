@@ -28,10 +28,10 @@ def load_splits(path):
     with open(path) as f:
         return json.load(f)
 
-
 def build_train_val_loaders(raw_datasets, splits, img_size=IMG_SIZE, batch_size=8,
-                            num_workers=2, pin_memory=False):
-    train_ds = Ai4MarsSegmentation(raw_datasets["train"], splits["train"], img_size=img_size)
+                            num_workers=2, pin_memory=False, train_transform=None):
+    train_ds = Ai4MarsSegmentation(raw_datasets["train"], splits["train"], img_size=img_size,
+                                   transform=train_transform)
     val_ds = Ai4MarsSegmentation(raw_datasets["train"], splits["val"], img_size=img_size)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True,
                               num_workers=num_workers, pin_memory=pin_memory)
