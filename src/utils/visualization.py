@@ -7,6 +7,8 @@ from matplotlib.patches import Patch
 from src.data.preprocessing import IGNORE_INDEX, IMAGENET_MEAN, IMAGENET_STD
 from src.evaluation.metrics import CLASS_NAMES
 
+# 
+
 CLASS_COLORS = ["#c2a15f", "#6b6b6b", "#f2e394", "#d1495b"]   # soil, bedrock, sand, big rock
 IGNORE_COLOR = "#1b1b1b"
 
@@ -50,6 +52,7 @@ def plot_confusion_matrix(conf, ax, title=""):
     ax.set_title(title)
 
 
+# Searches a dataset for images containing a particular class
 def find_indices_with_class(dataset, class_id, n=3, max_scan=150, min_pixels=200):
     """First `n` dataset indices whose label contains at least `min_pixels` of `class_id`."""
     found = []

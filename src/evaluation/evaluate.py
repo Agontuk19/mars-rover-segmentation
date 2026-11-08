@@ -11,7 +11,7 @@ from src.training.train import evaluate
 def load_best_model(ckpt_path, device, base=32, num_classes=4):
     """Build a U-Net and load weights from a checkpoint saved by `fit`."""
     ckpt = torch.load(ckpt_path, map_location=device)
-    model = UNet(in_channels=3, num_classes=num_classes, base=base).to(device)
+    model = UNet(in_channels=3, num_classes=num_classes, base=base).to(device)          # Model Load
     model.load_state_dict(ckpt["model_state"])
     print(f"Loaded epoch {ckpt['epoch']} (val mIoU at save time: {ckpt['val_miou']:.4f})")
     return model
@@ -30,12 +30,12 @@ def evaluate_splits(model, loaders, device, ignore_index=255, use_amp=False, ret
         loss, res = evaluate(model, loader, criterion, device,
                              ignore_index=ignore_index, use_amp=use_amp, desc=split)
         confusions[split] = res["confusion"]
-        rows.append({
+        rows.append({                                                                   # Stores evaluation metrics
             "split": split, "loss": loss, "miou": res["miou"], "pixel_acc": res["pixel_acc"],
             **{f"iou_{CLASS_NAMES[k]}": float(v) for k, v in enumerate(res["iou"])},
         })
 
     df = pd.DataFrame(rows)
-    mean_row = {"split": "mean", **df.drop(columns="split").mean().to_dict()}
+    mean_row = {"split": "mean", **df.drop(columns="split").mean().to_dict()}           # Calculates mean
     df = pd.concat([df, pd.DataFrame([mean_row])], ignore_index=True)
     return (df, confusions) if return_confusion else df

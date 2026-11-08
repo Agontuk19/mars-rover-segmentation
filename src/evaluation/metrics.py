@@ -44,12 +44,13 @@ class ConfusionMatrix:
         """preds, targets: integer tensors of identical shape (any device)."""
         preds = preds.detach().cpu().reshape(-1)
         targets = targets.detach().cpu().reshape(-1)
-        valid = targets != self.ignore_index
+        valid = targets != self.ignore_index                            # Excludes ignored pixels
         preds, targets = preds[valid], targets[valid]
         idx = targets * self.num_classes + preds
         counts = torch.bincount(idx, minlength=self.num_classes ** 2)
-        self.mat += counts.reshape(self.num_classes, self.num_classes)
+        self.mat += counts.reshape(self.num_classes, self.num_classes)  # 16 -> 4x4
 
+    # Confusion Matrix to NumPy array
     def compute(self):
         return scores_from_confusion(self.mat.numpy())
 
