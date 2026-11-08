@@ -1,0 +1,42 @@
+[
+  {
+    "split":"test_min1",
+    "loss":0.2753097592,
+    "miou":0.6578385594,
+    "pixel_acc":0.9175472928,
+    "iou_Soil":0.9055852875,
+    "iou_Bedrock":0.7975869937,
+    "iou_Sand":0.826531146,
+    "iou_Big Rock":0.1016508103
+  },
+  {
+    "split":"test_min2",
+    "loss":0.1327381602,
+    "miou":0.7117508606,
+    "pixel_acc":0.9553089972,
+    "iou_Soil":0.9504480304,
+    "iou_Bedrock":0.8734290415,
+    "iou_Sand":0.9032133278,
+    "iou_Big Rock":0.1199130429
+  },
+  {
+    "split":"test_min3",
+    "loss":0.0709588904,
+    "miou":0.8073219015,
+    "pixel_acc":0.9766109039,
+    "iou_Soil":0.9761931838,
+    "iou_Bedrock":0.9261354355,
+    "iou_Sand":0.9398740312,
+    "iou_Big Rock":0.3870849553
+  },
+  {
+    "split":"mean",
+    "loss":0.1596689366,
+    "miou":0.7256371072,
+    "pixel_acc":0.949822398,
+    "iou_Soil":0.9440755006,
+    "iou_Bedrock":0.8657171569,
+    "iou_Sand":0.889872835,
+    "iou_Big Rock":0.2028829362
+  }
+]
