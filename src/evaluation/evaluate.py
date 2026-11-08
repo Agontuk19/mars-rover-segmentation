@@ -8,10 +8,12 @@ from src.models.unet import UNet
 from src.training.train import evaluate
 
 
-def load_best_model(ckpt_path, device, base=32, num_classes=4):
-    """Build a U-Net and load weights from a checkpoint saved by `fit`."""
+def load_best_model(ckpt_path, device, model=None, base=32, num_classes=4):
+    """Load weights saved by `fit`. If no model is given, build the from-scratch U-Net."""
     ckpt = torch.load(ckpt_path, map_location=device)
-    model = UNet(in_channels=3, num_classes=num_classes, base=base).to(device)          # Model Load
+    if model is None:
+        model = UNet(in_channels=3, num_classes=num_classes, base=base)
+    model = model.to(device)
     model.load_state_dict(ckpt["model_state"])
     print(f"Loaded epoch {ckpt['epoch']} (val mIoU at save time: {ckpt['val_miou']:.4f})")
     return model
