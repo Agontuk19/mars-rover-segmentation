@@ -1,497 +1,108 @@
-AI4MARS Mars Rover Semantic Segmentation
+# Mars Rover Terrain Segmentation
 
-Project Handoff Summary — Dataset Exploration and Preprocessing
+Pixel-level terrain classification (Soil, Bedrock, Sand, Big Rock) on Mars rover images, using the
+[AI4Mars](https://huggingface.co/datasets/hassanjbara/AI4MARS) dataset. The repo contains the full
+PyTorch pipeline: data audit, preprocessing, training, and evaluation. All training ran on a single T4 GPU.
 
-1. Project Overview
+**Final model:** an ensemble of two U-Nets with ImageNet-pretrained ResNet34 encoders reaches
+**0.745 mIoU** on the official test splits (a U-Net trained from scratch reaches 0.726).
 
-We are working on a Computer Vision project using the AI4MARS dataset for Mars rover terrain semantic segmentation.
+## Results
 
-The objective is to develop a deep learning model that can perform pixel-level terrain classification from Mars rover images.
+| Model | Val mIoU | Test mIoU | Soil | Bedrock | Sand | Big Rock |
+|---|---|---|---|---|---|---|
+| U-Net (from scratch) | 0.742 | 0.726 | 0.944 | 0.866 | 0.890 | 0.203 |
+| U-Net, ResNet34 pretrained | 0.855 | 0.740 | 0.949 | 0.880 | 0.915 | 0.217 |
+| + augmentation | 0.855 | 0.734 | 0.951 | 0.878 | 0.920 | 0.187 |
+| **Ensemble of the two pretrained models** | - | **0.745** | 0.953 | 0.883 | 0.921 | 0.223 |
 
-This is a semantic segmentation task, not ordinary image classification.
+Test = mean over `test_min1/2/3`; per-class columns are test IoU. These three splits are the **same 322 images**
+with labels filtered at three annotator-agreement levels, so they are one test set, not three.
 
-Each input image has a corresponding pixel-level label mask. Every labeled pixel belongs to one of four terrain categories, or is marked as unlabeled.
+![Confusion matrices of the final ensemble](results/ensemble/confusion_matrices_ensemble.png)
 
-The dataset is hosted on Hugging Face:
+## Key findings
 
-hassanjbara/AI4MARS
+- **Validation overstates test performance.** Validation shares scenes with the training data. Big Rock IoU is
+  0.62 on validation but 0.22 on test, so model selection on validation alone would have been misleading.
+- **Big Rock on test is a precision problem** (precision 0.23, recall 0.72): the model over-predicts the rare class.
+- **Model differences are small relative to noise.** A paired bootstrap over test images gives
+  pretrained vs. scratch +0.021 mIoU (95% CI -0.008 to +0.066) and ensemble vs. single model +0.007 (CI +0.0004 to +0.024).
+- **Augmentation reduced overfitting** (train/val loss 0.015/0.118 down to 0.074/0.087) without improving test mIoU.
+- **The source labels already comply with the rover/30 m exclusions.** Applying them changed 0 pixels on all
+  16,064 usable train rows and all test rows, so the step is kept as an enforced, tested guarantee.
+- **Exploratory:** a negative bias on the Big Rock logit raised its precision from 0.23 to 0.58 and mIoU of the
+  pretrained model from 0.740 to 0.793 when tuned on all test images (in-sample). A half-split estimate gave
+  +0.017, so this is not part of the headline result.
 
-We load it directly using:
+## Pipeline
 
-from datasets import load_dataset
-dataset = load_dataset("hassanjbara/AI4MARS")
+1. **Data audit:** 19,096 samples checked for corrupt images, missing masks and shape mismatches. Found 3 corrupt
+   images, 2,066 unlabeled train rows and 1 labeled row without a range mask.
+2. **Preprocessing:** rover-body and beyond-30 m pixels set to the ignore label (255) at full resolution; labels
+   resized with nearest-neighbor, images with bilinear, at 512x512; 163 fully ignored rows dropped.
+3. **Split:** blocks of 100 consecutive rows, 90/10 (`data/splits.json`, seed 42): 14,312 train / 1,589 val.
+   The dataset has no sequence IDs, so blocks reduce near-duplicate leakage.
+4. **Models:** U-Net from scratch (7.8M parameters); U-Net with an ImageNet ResNet34 encoder (24.4M,
+   `segmentation_models_pytorch`).
+5. **Training:** AdamW, cosine schedule, mixed precision, cross-entropy with `ignore_index=255`, 15 epochs,
+   batch size 8, resumable checkpoints (about 2.3 h per run on a Kaggle T4).
+6. **Evaluation:** confusion-matrix mIoU with 255 ignored, per-class IoU, Big Rock precision/recall, paired
+   bootstrap over test images.
 
-Important: We are using the Hugging Face dataset directly. Do not assume that the dataset has been downloaded into a manually organized local data/ directory.
+## Repository structure
 
-⸻
-
-2. Project Structure
-
-The current project structure is:
-
-mars-rover-segmentation/
-│
-├── data/
-│   └── .gitkeep
-│
+```
+├── configs/
+├── data/splits.json          # fixed train/val row indices
 ├── notebooks/
 │   ├── 01_dataset_exploration.ipynb
 │   ├── 02_data_preprocessing.ipynb
 │   ├── 03_baseline.ipynb
 │   ├── 04_model_experiments.ipynb
 │   └── 05_evaluation.ipynb
-│
+├── results/                  # metrics, histories, configs, figures (no weights)
 ├── src/
-│
-├── README.md
+│   ├── data/                 # preprocessing, dataset loaders, augmentation
+│   ├── models/               # U-Net, model factory
+│   ├── training/             # trainer, losses, experiment runner
+│   ├── evaluation/           # metrics, ensembling, bootstrap analysis
+│   └── utils/                # seeding/device, visualization
 └── requirements.txt
+```
 
-The first two notebooks are the current focus:
+## Quickstart
 
-* 01_dataset_exploration.ipynb: Dataset understanding and exploratory analysis.
-* 02_data_preprocessing.ipynb: Dataset integrity validation and preprocessing.
+```bash
+git clone https://github.com/Agontuk19/mars-rover-segmentation.git
+cd mars-rover-segmentation
+pip install -r requirements.txt
+```
 
-The project has not yet moved into model development.
+Run one experiment (needs a CUDA GPU; 512x512 at batch size 8 ran on a 16 GB T4):
 
-⸻
+```python
+from src.data.dataset import load_raw_datasets, load_splits
+from src.training.run import run_experiment
+from src.utils.common import get_device
 
-PART A — DATASET EXPLORATION
+raw = load_raw_datasets()                      # downloads AI4Mars from Hugging Face
+splits = load_splits("data/splits.json")
+cfg = {"name": "unet_resnet34_pretrained", "model": "smp_unet", "encoder": "resnet34",
+       "encoder_weights": "imagenet", "loss": "ce", "epochs": 15, "lr": 3e-4}
+run_experiment(cfg, raw, splits, get_device(), "outputs/experiments")
+```
 
-3. Dataset Structure
+Evaluation and ensembling: `notebooks/05_evaluation.ipynb`. It loads `checkpoints/<name>/best.pt`;
+model weights are not stored in the repo.
 
-The dataset contains four splits:
+## Limitations
 
-Split	Number of Samples
-train	18,130
-test_min1	322
-test_min2	322
-test_min3	322
-Total	19,096
+- One training seed per model, and a 322-image test set: differences below about 0.01 mIoU are not reliable.
+- Models and the ensemble were compared on the test set, so test numbers are slightly optimistic.
+- Big Rock remains weak (IoU about 0.22); the validation/test label mismatch limits what training changes can fix.
 
-Each split contains the following features:
+## Dataset
 
-Feature	Description
-image	Original Mars rover image
-label_mask	Pixel-level terrain annotations
-rover_mask	Mask identifying the rover’s own body
-range_mask	Mask identifying regions beyond 30 meters
-has_masks	Whether auxiliary masks are available
-has_labels	Whether a terrain label mask is available
-
-All images and masks are represented as Hugging Face Image features.
-
-4. Training Annotation Distribution
-
-The training split contains:
-
-has_masks	has_labels	Samples
-False	False	33
-False	True	1
-True	False	2,033
-True	True	16,063
-
-Therefore:
-
-* Total training samples: 18,130
-* Labeled samples: 16,064
-* Unlabeled samples: 2,066
-
-Approximately 88.60% of the training samples have both masks and labels.
-
-The three test splits each contain 322 samples, and all samples in those splits have both masks and labels.
-
-5. Image and Mask Properties
-
-An inspection of 200 samples from each split showed:
-
-Property	Result
-Image dimensions	1024 × 1024
-Image mode	L
-Mask dimensions	1024 × 1024
-Mask mode	L
-
-All inspected images and masks were grayscale.
-
-The dimensions of the original images and masks are aligned.
-
-6. Terrain Class Semantics
-
-The dataset uses the following pixel values:
-
-Pixel Value	Terrain Class
-0	Soil
-1	Bedrock
-2	Sand
-3	Big Rock
-255	NULL / Unlabeled
-
-There are four actual terrain classes, not five.
-
-The value 255 represents unlabeled pixels and must be treated as an ignore value.
-
-The dataset documentation defines Big Rock as a rock greater than 30 cm tall and at least 50 cm wide.
-
-The unique pixel values found in the inspected label masks were:
-
-[0, 1, 2, 3, 255]
-
-No unexpected label values were found.
-
-The auxiliary masks use binary values:
-
-* 0: Background / not excluded
-* 1: Region to be excluded
-
-7. Initial Pixel Distribution
-
-An initial inspection of 100 labeled training masks produced:
-
-Pixel Value	Number of Pixels
-0	21,128,115
-1	30,323,671
-2	6,671,689
-3	917,845
-255	45,816,280
-
-A later full pixel audit across all dataset splits produced the following distribution:
-
-Pixel Value	Class	Total Pixels	Masks Containing Value
-0	Soil	3,714,545,901	8,507
-1	Bedrock	4,791,786,478	10,886
-2	Sand	1,239,993,686	5,813
-3	Big Rock	86,815,188	2,304
-255	NULL	8,024,108,027	17,030
-
-No unexpected pixel values were discovered.
-
-The distribution shows substantial class imbalance. Big Rock is particularly underrepresented compared with the other terrain classes.
-
-The full distribution above is the original label-mask distribution, before applying rover and range exclusions.
-
-8. Annotation Consistency
-
-We also checked whether the has_labels metadata agreed with the actual availability of label_mask.
-
-Result:
-
-Annotation inconsistencies: 0
-
-All samples were consistent with their metadata.
-
-This confirms that the label availability metadata can be used reliably when identifying labeled training samples.
-
-⸻
-
-PART B — DATASET INTEGRITY AUDIT
-
-9. Why We Conducted an Integrity Audit
-
-Before preprocessing, we needed to establish whether:
-
-* Original images were corrupted.
-* Label masks were missing.
-* Rover masks were missing.
-* Range masks were missing.
-* Images and masks had matching dimensions.
-* Any unexpected mask values existed.
-
-The integrity audit was implemented in 02_data_preprocessing.ipynb.
-
-We disabled automatic Hugging Face image decoding using:
-
-from datasets import Image as HFImage
-raw_datasets = {}
-image_columns = [
-    "image",
-    "label_mask",
-    "rover_mask",
-    "range_mask"
-]
-for split, data in dataset.items():
-    raw_data = data
-    for column in image_columns:
-        raw_data = raw_data.cast_column(
-            column,
-            HFImage(decode=False)
-        )
-    raw_datasets[split] = raw_data
-
-This allowed us to inspect image bytes and paths directly and identify corrupted files without relying on automatic decoding.
-
-10. Missing and Corrupted Data
-
-The integrity audit produced:
-
-Split	Feature	Missing	Corrupted
-train	image	0	3
-train	label_mask	2,066	0
-train	rover_mask	33	0
-train	range_mask	34	0
-test_min1	image	0	0
-test_min1	label_mask	0	0
-test_min1	rover_mask	0	0
-test_min1	range_mask	0	0
-test_min2	image	0	0
-test_min2	label_mask	0	0
-test_min2	rover_mask	0	0
-test_min2	range_mask	0	0
-test_min3	image	0	0
-test_min3	label_mask	0	0
-test_min3	rover_mask	0	0
-test_min3	range_mask	0	0
-
-Three corrupted original images were identified in the training split:
-
-[8990, 12577, 17053]
-
-No corrupted images or masks were found in the three test splits.
-
-Important observations
-
-* There are 2,066 training samples without label masks.
-* There are 33 training samples without rover masks.
-* There are 34 training samples without range masks.
-* Three training images are corrupted.
-
-The missing auxiliary masks are separate from the missing label masks. Their overlap must be considered when designing preprocessing.
-
-11. Image and Mask Dimension Verification
-
-We inspected the dimensions of the images and masks.
-
-The initial inspection showed that all 200 sampled images from each split were 1024 × 1024 grayscale images.
-
-We also performed a full training image-mask alignment audit.
-
-Result:
-
-Split	Matching	Mismatched	Missing Masks	Corrupted
-train	16,064	0	2,063	3
-test_min1	322	0	0	0
-test_min2	322	0	0	0
-test_min3	322	0	0	0
-
-All valid image-label pairs had matching dimensions.
-
-There were no image-mask dimension mismatches.
-
-The 2,063 missing masks in this alignment table are valid training images without label masks. The remaining three corrupted image rows could not be treated as valid image-mask pairs.
-
-The earlier missing label_mask count of 2,066 therefore reconciles as:
-
-2,063 missing label masks
-+ 3 corrupted image rows
-= 2,066 unusable image-label rows
-
-⸻
-
-PART C — MASK PREPROCESSING REQUIREMENTS
-
-12. Official Preprocessing Instructions
-
-The project guide PDF, Space_ML_Project_Guides.pdf, provides explicit instructions for AI4MARS preprocessing.
-
-Each dataset row contains:
-
-* The original rover image.
-* The terrain label mask.
-* The rover mask, identifying the rover’s own body.
-* The range mask, identifying regions beyond 30 meters.
-
-The guide explicitly instructs us to:
-
-Set the rover’s body and everything beyond 30 meters to the no-label value.
-
-This is an important preprocessing requirement.
-
-We must not simply train on the original label masks without applying these exclusions.
-
-13. Required Mask Processing
-
-The preprocessing pipeline must handle four things:
-
-1. The four actual terrain classes.
-2. Existing unlabeled pixels (255).
-3. Rover body regions.
-4. Regions beyond 30 meters.
-
-The intended behavior is:
-
-A. Preserve the four terrain classes
-
-Keep the original class IDs:
-
-0 = Soil
-1 = Bedrock
-2 = Sand
-3 = Big Rock
-
-Do not remap them unnecessarily.
-
-B. Preserve existing unlabeled pixels
-
-Pixels already labeled 255 must remain 255.
-
-C. Exclude rover body regions
-
-For the rover mask:
-
-label[rover_mask > 0] = 255
-
-D. Exclude regions beyond 30 meters
-
-For the range mask:
-
-label[range_mask > 0] = 255
-
-Both exclusions must be applied to the terrain label mask.
-
-The original image should remain unchanged. We are modifying the target label mask, not deleting image pixels.
-
-Important implementation requirements
-
-* Convert masks into NumPy arrays.
-* Make a copy of the original label mask before modifying it.
-* Ensure the label mask and auxiliary masks have matching dimensions.
-* Use mask > 0 to identify excluded regions, following the project guide.
-* If an auxiliary mask is None, handle it safely rather than attempting to decode it.
-* Preserve the original class IDs and the ignore value.
-* Apply rover and range exclusions before resizing.
-* When resizing segmentation masks later, use nearest-neighbor interpolation. Never use bilinear or bicubic interpolation for categorical label masks.
-
-The project guide’s example implementation follows this logic:
-
-def prepare(row):
-    image = np.array(row["image"].convert("RGB"))
-    label = np.array(row["label_mask"])
-    label = label[..., 0] if label.ndim == 3 else label
-    label = label.astype(np.int64)
-    for key in ("rover_mask", "range_mask"):
-        if row[key] is not None:
-            m = np.array(row[key])
-            m = m[..., 0] if m.ndim == 3 else m
-            label[m > 0] = 255
-    return image, label
-
-This is the reference behavior from the project guide, not necessarily the final production implementation. Add appropriate validation and error handling.
-
-14. Handling Missing Auxiliary Masks
-
-There are some training samples with missing auxiliary masks:
-
-* 33 missing rover masks.
-* 34 missing range masks.
-
-The project guide’s example skips an exclusion when its corresponding mask is None.
-
-This is a possible approach, but the preprocessing implementation should explicitly track these cases.
-
-Do not silently claim that all rover and range regions were excluded when the corresponding mask was unavailable.
-
-A decision is needed about how to handle these samples in the final training pipeline. At minimum, record the missing-mask counts and make the behavior transparent.
-
-Do not automatically discard all such samples without evaluating the consequences.
-
-15. Expected Preprocessing Validation
-
-After applying the exclusions, validate the resulting masks.
-
-The validation should establish:
-
-Label integrity
-
-* Only 0, 1, 2, 3, and 255 are present.
-* No unexpected class IDs have been introduced.
-
-Exclusion correctness
-
-* Every pixel where rover_mask > 0 becomes 255.
-* Every pixel where range_mask > 0 becomes 255.
-* Pixels already labeled 255 remain 255.
-
-Shape integrity
-
-* The processed label mask retains the original dimensions before resizing.
-* The original image and processed label mask remain spatially aligned.
-
-Data integrity
-
-* Original source masks are not modified.
-* The original images are not modified.
-* Missing auxiliary masks are tracked.
-
-Distribution analysis
-
-* Calculate the class distribution after exclusions.
-* Compare the distribution before and after preprocessing.
-* Track the number and percentage of ignored pixels.
-* Observe how much each exclusion contributes to the ignored-pixel count.
-
-A useful visualization should compare:
-
-1. Original rover image.
-2. Original terrain label mask.
-3. Rover mask.
-4. Range mask.
-5. Final processed label mask.
-
-Use a clear discrete color mapping so the four terrain classes and the ignore region are visually distinguishable.
-
-⸻
-
-PART D — CURRENT PROJECT STATUS
-
-16. Completed Work
-
-Notebook 01 — Dataset Exploration
-
-Completed:
-
-* Loaded the Hugging Face dataset.
-* Inspected all dataset splits.
-* Examined annotation availability.
-* Inspected image and mask dimensions.
-* Identified grayscale image format.
-* Visualized sample images and masks.
-* Identified terrain label IDs.
-* Examined auxiliary mask values.
-* Calculated initial pixel distributions.
-* Checked annotation metadata consistency.
-* Inspected test split annotation availability.
-
-Notebook 02 — Dataset Integrity Audit
-
-Completed:
-
-* Disabled automatic image decoding.
-* Checked missing and corrupted files.
-* Identified three corrupted training images.
-* Identified missing label and auxiliary masks.
-* Verified image dimensions.
-* Verified image-mask alignment.
-* Confirmed there are no unexpected label values.
-
-## Preprocessing: Completed
-
-**Pipeline:** raw row → safe decode → rover/range exclusions on a copy of the label →
-nearest-neighbor resize (labels) / bilinear (images) → RGB + ImageNet normalization → tensors.
-
-**Findings**
-- Rover (`rover_mask > 0`) and >30 m (`range_mask > 0`) regions are already 255 in the
-  source labels: enforced on all 16,064 usable train rows and 966 test rows, 0 pixels changed.
-- 3 corrupted images are all unlabeled. Only train row 7211 lacks a range mask (kept, flagged).
-- 163 usable train rows are 100% ignored (no signal) and were dropped from train/val;
-  test splits untouched.
-- Class shares among labeled train pixels: Soil 37.2%, Bedrock 49.8%, Sand 12.0%,
-  Big Rock 0.9% (severe imbalance).
-
-**Splits** (`data/splits.json`): block-wise (100 consecutive rows) 90/10, seed 42.
-Train 14,312 | Val 1,589 | test_min1/2/3: 322 each. Block-wise is a heuristic against
-near-duplicate leakage (no sequence IDs exist in the dataset).
-
-**Code:** `src/data/preprocessing.py` (`apply_exclusions`, `resize_label`, `Ai4MarsSegmentation`).
-Image size 512x512. Labels are int64 with 255 as the ignore index.
-
-**For modeling:** use `ignore_index=255` in the loss, and plan for Big Rock imbalance
-(class weights, Dice/focal loss, or per-class IoU as the primary metric).
-
+AI4Mars (NASA JPL), loaded through the Hugging Face mirror `hassanjbara/AI4MARS`: 16,064 labeled training
+images and 322 test images with four terrain classes.
